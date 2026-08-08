@@ -10,6 +10,15 @@ WordPress の `uploads/docs/{repo}/` 配下を自動検出し、複数リポジ�
 
 外部ライブラリは使用しません。
 
+## プラグイン構成
+
+| ファイル | 責務 |
+| --- | --- |
+| `md-docs.php` | 初期化、ルーティング、ファイル探索、Markdown 変換 |
+| `class-md-docs-settings.php` | 設定ページ、許可ファイルの保存と検証 |
+| `class-md-docs-view.php` | ドキュメント、一覧、通知などの HTML 生成 |
+| `assets/md-docs.css` | 表示スタイル |
+
 ## インストール
 
 1. `md-docs.zip` を WordPress 管理画面の「プラグイン → 新規プラグインを追加 → プラグインのアップロード」からアップロードします。

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MD Docs
  * Description: uploads/docs 配下の Markdown ドキュメントを自動検出して表示します。
- * Version: 1.3.0
+ * Version: 1.3.1
  * Requires at least: 6.4
  * Requires PHP: 8.0
  * Author: bit0ラボ
@@ -14,13 +14,14 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+require_once __DIR__ . '/class-md-docs-settings.php';
+require_once __DIR__ . '/class-md-docs-view.php';
+
 final class MD_Docs
 {
-    private const VERSION = '1.3.0';
+    private const VERSION = '1.3.1';
     private const CACHE_TTL = 300;
     private const QUERY_FLAG = 'md_docs_view';
-    private const OPTION_ALLOWED_FILES = 'md_docs_allowed_files';
-    private const SETTINGS_GROUP = 'md_docs_settings';
 
     public static function init(): void
     {
@@ -29,8 +30,7 @@ final class MD_Docs
         add_filter('query_vars', [self::class, 'add_query_vars']);
         add_action('template_redirect', [self::class, 'render_route']);
         add_shortcode('md_docs', [self::class, 'shortcode']);
-        add_action('admin_menu', [self::class, 'add_settings_page']);
-        add_action('admin_init', [self::class, 'register_settings']);
+        MD_Docs_Settings::init(static fn(): array => self::settings_files());
     }
 
     public static function activate(): void
@@ -78,120 +78,6 @@ final class MD_Docs
     {
         $attributes = shortcode_atts(['repo' => '', 'path' => ''], $attributes, 'md_docs');
         return self::render((string) $attributes['repo'], (string) $attributes['path']);
-    }
-
-    public static function add_settings_page(): void
-    {
-        add_options_page(
-            'MD Docs 設定',
-            'MD Docs',
-            'manage_options',
-            'md-docs',
-            [self::class, 'render_settings_page']
-        );
-    }
-
-    public static function register_settings(): void
-    {
-        register_setting(
-            self::SETTINGS_GROUP,
-            self::OPTION_ALLOWED_FILES,
-            [
-                'type' => 'array',
-                'sanitize_callback' => [self::class, 'sanitize_allowed_files'],
-            ]
-        );
-    }
-
-    public static function sanitize_allowed_files(mixed $value): array
-    {
-        if (!is_array($value)) {
-            return [];
-        }
-
-        $allowed = [];
-        foreach ($value as $repo => $files) {
-            $repo = self::clean_repo((string) $repo);
-            if ($repo === '' || !is_array($files)) {
-                continue;
-            }
-
-            $repo_dir = self::repo_dir($repo);
-            if ($repo_dir === null) {
-                continue;
-            }
-
-            $available = self::discover_markdown_files($repo_dir);
-            $selected = [];
-            foreach ($files as $file) {
-                $relative = self::clean_relative_path((string) $file);
-                if ($relative !== null && in_array($relative, $available, true)) {
-                    $selected[] = $relative;
-                }
-            }
-            $allowed[$repo] = array_values(array_unique($selected));
-        }
-        return $allowed;
-    }
-
-    public static function render_settings_page(): void
-    {
-        if (!current_user_can('manage_options')) {
-            return;
-        }
-
-        $saved = get_option(self::OPTION_ALLOWED_FILES, null);
-        $is_unconfigured = !is_array($saved);
-        $repos = self::repositories();
-        ?>
-        <div class="wrap">
-            <h1>MD Docs 設定</h1>
-            <p>公開を許可する Markdown ファイルをリポジトリごとに選択してください。未選択のファイルは、一覧にも本文にも表示されません。</p>
-
-            <form action="options.php" method="post">
-                <?php settings_fields(self::SETTINGS_GROUP); ?>
-
-                <?php if ($repos === []) : ?>
-                    <p>uploads/docs/ 配下にリポジトリが見つかりません。</p>
-                <?php endif; ?>
-
-                <?php foreach ($repos as $repo) : ?>
-                    <?php
-                    $repo_dir = self::repo_dir($repo);
-                    if ($repo_dir === null) {
-                        continue;
-                    }
-                    $files = self::discover_markdown_files($repo_dir);
-                    $selected = isset($saved[$repo]) && is_array($saved[$repo]) ? $saved[$repo] : [];
-                    $field_name = self::OPTION_ALLOWED_FILES . '[' . $repo . '][]';
-                    ?>
-                    <fieldset style="margin: 1.5em 0;">
-                        <legend><strong><?php echo esc_html($repo); ?></strong></legend>
-                        <input type="hidden" name="<?php echo esc_attr($field_name); ?>" value="">
-
-                        <?php if ($files === []) : ?>
-                            <p>Markdown ファイルがありません。</p>
-                        <?php endif; ?>
-
-                        <?php foreach ($files as $file) : ?>
-                            <?php $is_checked = $is_unconfigured || in_array($file, $selected, true); ?>
-                            <label style="display: block; margin: 0.5em 0;">
-                                <input
-                                    type="checkbox"
-                                    name="<?php echo esc_attr($field_name); ?>"
-                                    value="<?php echo esc_attr($file); ?>"
-                                    <?php checked($is_checked); ?>
-                                >
-                                <code><?php echo esc_html($file); ?></code>
-                            </label>
-                        <?php endforeach; ?>
-                    </fieldset>
-                <?php endforeach; ?>
-
-                <?php submit_button(); ?>
-            </form>
-        </div>
-        <?php
     }
 
     public static function render_route(): void
@@ -243,55 +129,26 @@ final class MD_Docs
             return self::notice('ドキュメントを読み込めません。');
         }
 
-        $html = self::cached_markdown($repo, $relative_file, $absolute_file);
-        $navigation = self::render_navigation($repo, $files, $relative_file);
         $document_name = preg_replace('/\.md$/i', '', basename($relative_file)) ?? basename($relative_file);
         if (strcasecmp($document_name, 'README') === 0) {
             $document_name = $repo;
         }
-        $docs_url = esc_url(home_url('/docs/'));
-        $repo_url = esc_url(self::docs_url($repo));
-        $repo_name = esc_html($repo);
-        $document_title = esc_html($document_name);
-        $home_link = self::home_link();
-        $breadcrumbs = <<<HTML
-            <a href="{$docs_url}">ドキュメント</a>
-            <span aria-hidden="true">/</span>
-            <a href="{$repo_url}">{$repo_name}</a>
-            HTML;
-        if ($document_name !== $repo) {
-            $breadcrumbs .= <<<HTML
 
-                <span aria-hidden="true">/</span>
-                <span aria-current="page">{$document_title}</span>
-                HTML;
+        $breadcrumbs = [
+            ['label' => 'ドキュメント', 'url' => home_url('/docs/')],
+            ['label' => $repo, 'url' => self::docs_url($repo)],
+        ];
+        if ($document_name !== $repo) {
+            $breadcrumbs[] = ['label' => $document_name];
         }
 
-        return <<<HTML
-            <div class="md-docs-shell">
-                <header class="md-docs__hero">
-                    <div>
-                        <span class="md-docs__eyebrow">Knowledge base</span>
-                        <h1>{$document_title}</h1>
-                        <nav class="md-docs__breadcrumbs" aria-label="パンくず">
-                            {$breadcrumbs}
-                        </nav>
-                    </div>
-                    <div class="md-docs__hero-actions">
-                        {$home_link}
-                        <span class="md-docs__file-badge">Markdown</span>
-                    </div>
-                </header>
-                <div class="md-docs">
-                    <aside class="md-docs__sidebar">
-                        {$navigation}
-                    </aside>
-                    <article class="md-docs__content">
-                        {$html}
-                    </article>
-                </div>
-            </div>
-            HTML;
+        return MD_Docs_View::document([
+            'title' => $document_name,
+            'breadcrumbs' => $breadcrumbs,
+            'home_url' => home_url('/'),
+            'navigation' => self::navigation_data($repo, $files, $relative_file),
+            'html' => self::cached_markdown($repo, $relative_file, $absolute_file),
+        ]);
     }
 
     private static function render_collection(string $path): string
@@ -301,8 +158,7 @@ final class MD_Docs
             return self::notice('すべてのリポジトリを表示する場合は path を指定してください。');
         }
 
-        $items = '';
-        $count = 0;
+        $items = [];
         foreach (self::repositories() as $repo) {
             $repo_dir = self::repo_dir($repo);
             if ($repo_dir === null) {
@@ -318,53 +174,27 @@ final class MD_Docs
                 continue;
             }
 
-            $document_url = esc_url(self::docs_url($repo, $path));
-            $repo_name = esc_html($repo);
-            $document_html = self::cached_markdown($repo, $relative_file, $absolute_file);
-            $items .= <<<HTML
-                <section class="md-docs__collection-item">
-                    <h2><a href="{$document_url}">{$repo_name}</a></h2>
-                    <article class="md-docs__content">
-                        {$document_html}
-                    </article>
-                </section>
-                HTML;
-            $count++;
+            $items[] = [
+                'repo' => $repo,
+                'url' => self::docs_url($repo, $path),
+                'html' => self::cached_markdown($repo, $relative_file, $absolute_file),
+            ];
         }
 
-        if ($count === 0) {
+        if ($items === []) {
             return self::notice('指定されたドキュメントは、許可済みのリポジトリに見つかりません。');
         }
 
         $document_name = preg_replace('/\.md$/i', '', basename($path)) ?? basename($path);
-        $docs_url = esc_url(home_url('/docs/'));
-        $document_title = esc_html($document_name);
-        $home_link = self::home_link();
-
-        return <<<HTML
-            <div class="md-docs-shell md-docs-shell--collection">
-                <header class="md-docs__hero">
-                    <div>
-                        <span class="md-docs__eyebrow">Knowledge base</span>
-                        <h1>{$document_title}</h1>
-                        <nav class="md-docs__breadcrumbs" aria-label="パンくず">
-                            <a href="{$docs_url}">ドキュメント</a>
-                            <span aria-hidden="true">/</span>
-                            <span aria-current="page">{$document_title}</span>
-                        </nav>
-                    </div>
-                    <div class="md-docs__hero-actions">
-                        {$home_link}
-                        <span class="md-docs__count-badge">{$count} repositories</span>
-                    </div>
-                </header>
-                <div class="md-docs md-docs--collection">
-                    <div class="md-docs__collection">
-                        {$items}
-                    </div>
-                </div>
-            </div>
-            HTML;
+        return MD_Docs_View::collection([
+            'title' => $document_name,
+            'breadcrumbs' => [
+                ['label' => 'ドキュメント', 'url' => home_url('/docs/')],
+                ['label' => $document_name],
+            ],
+            'home_url' => home_url('/'),
+            'items' => $items,
+        ]);
     }
 
     private static function render_repo_list(): string
@@ -374,48 +204,14 @@ final class MD_Docs
             return self::notice('uploads/docs 配下にドキュメントがありません。');
         }
 
-        $items = '';
-        foreach ($repos as $repo) {
-            $repo_url = esc_url(self::docs_url($repo));
-            $repo_name = esc_html($repo);
-            $items .= <<<HTML
-                <li>
-                    <a href="{$repo_url}">
-                        <span class="md-docs__repo-icon" aria-hidden="true"></span>
-                        <span>
-                            <strong>{$repo_name}</strong>
-                            <small>ドキュメントを見る</small>
-                        </span>
-                        <span class="md-docs__repo-arrow" aria-hidden="true">→</span>
-                    </a>
-                </li>
-                HTML;
-        }
-
-        $home_link = self::home_link();
-        $repo_count = count($repos);
-
-        return <<<HTML
-            <div class="md-docs-shell md-docs-shell--repos">
-                <header class="md-docs__hero">
-                    <div>
-                        <span class="md-docs__eyebrow">Knowledge base</span>
-                        <p>技術情報を参照できます。</p>
-                    </div>
-                    <div class="md-docs__hero-actions">
-                        {$home_link}
-                        <span class="md-docs__count-badge">{$repo_count} repositories</span>
-                    </div>
-                </header>
-                <div class="md-docs md-docs--repos">
-                    <section class="md-docs__content">
-                        <ul class="md-docs__repo-list">
-                            {$items}
-                        </ul>
-                    </section>
-                </div>
-            </div>
-            HTML;
+        $items = array_map(
+            static fn(string $repo): array => [
+                'name' => $repo,
+                'url' => self::docs_url($repo),
+            ],
+            $repos
+        );
+        return MD_Docs_View::repositories($items, home_url('/'));
     }
 
     private static function repositories(): array
@@ -447,13 +243,25 @@ final class MD_Docs
     private static function markdown_files(string $repo, string $repo_dir): array
     {
         $files = self::discover_markdown_files($repo_dir);
-        $saved = get_option(self::OPTION_ALLOWED_FILES, null);
+        $saved = get_option(MD_Docs_Settings::OPTION_ALLOWED_FILES, null);
         if (!is_array($saved)) {
             return $files;
         }
 
         $allowed = isset($saved[$repo]) && is_array($saved[$repo]) ? $saved[$repo] : [];
         return array_values(array_intersect($files, $allowed));
+    }
+
+    private static function settings_files(): array
+    {
+        $files = [];
+        foreach (self::repositories() as $repo) {
+            $repo_dir = self::repo_dir($repo);
+            if ($repo_dir !== null) {
+                $files[$repo] = self::discover_markdown_files($repo_dir);
+            }
+        }
+        return $files;
     }
 
     private static function discover_markdown_files(string $repo_dir): array
@@ -668,9 +476,9 @@ final class MD_Docs
         return self::uploads_docs_url($repo, $relative) . $query . $fragment;
     }
 
-    private static function render_navigation(string $repo, array $files, string $active): string
+    private static function navigation_data(string $repo, array $files, string $active): array
     {
-        $items = '';
+        $items = [];
         foreach ($files as $file) {
             $route = preg_replace('/\.md$/i', '', $file) ?? $file;
             $route = preg_replace('#(^|/)README$#i', '$1', $route) ?? $route;
@@ -679,32 +487,17 @@ final class MD_Docs
             if ($label === '.' || $label === '') {
                 $label = $repo;
             }
-            $active_attributes = $file === $active ? ' class="is-active" aria-current="page"' : '';
-            $document_url = esc_url(self::docs_url($repo, trim($route, '/')));
-            $document_label = esc_html($label);
-            $items .= <<<HTML
-                <li>
-                    <a{$active_attributes} href="{$document_url}">{$document_label}</a>
-                </li>
-                HTML;
+            $items[] = [
+                'label' => $label,
+                'url' => self::docs_url($repo, trim($route, '/')),
+                'active' => $file === $active,
+            ];
         }
-
-        $page_count = count($files);
-        $repo_url = esc_url(self::docs_url($repo));
-        $repo_name = esc_html($repo);
-
-        return <<<HTML
-            <div class="md-docs__sidebar-heading">
-                <span>Contents</span>
-                <small>{$page_count} pages</small>
-            </div>
-            <h2><a href="{$repo_url}">{$repo_name}</a></h2>
-            <nav aria-label="ドキュメント内">
-                <ul>
-                    {$items}
-                </ul>
-            </nav>
-            HTML;
+        return [
+            'repo' => $repo,
+            'repo_url' => self::docs_url($repo),
+            'items' => $items,
+        ];
     }
 
     private static function docs_dir(): string
@@ -788,27 +581,7 @@ final class MD_Docs
 
     private static function notice(string $message): string
     {
-        $notice = esc_html($message);
-        $home_link = self::home_link();
-
-        return <<<HTML
-            <div class="md-docs md-docs--notice">
-                <p>{$notice}</p>
-                {$home_link}
-            </div>
-            HTML;
-    }
-
-    private static function home_link(): string
-    {
-        $home_url = esc_url(home_url('/'));
-
-        return <<<HTML
-            <a class="md-docs__home-link" href="{$home_url}">
-                <span aria-hidden="true">←</span>
-                ホームへ戻る
-            </a>
-            HTML;
+        return MD_Docs_View::notice($message, home_url('/'));
     }
 }
 
