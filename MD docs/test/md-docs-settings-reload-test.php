@@ -25,17 +25,27 @@ function wp_safe_redirect(string $url): never
     throw new LogicException('redirected');
 }
 function wp_die(string $message): never { throw new RuntimeException($message); }
+function sanitize_text_field(string $value): string { return trim(strip_tags($value)); }
 
 define('ABSPATH', __DIR__);
 require dirname(__DIR__) . '/md-docs/class-md-docs-settings.php';
 
 MD_Docs_Settings::init(
-    static fn(): array => [],
+    static fn(): array => ['repo-A' => ['README.md'], 'repo-B' => []],
     static function (): bool {
         $GLOBALS['md_docs_test_reloaded'] = true;
         return true;
     }
 );
+
+$names = MD_Docs_Settings::sanitize_repository_names([
+    'repo-A' => ' 製品A <b>ドキュメント</b> ',
+    'repo-B' => ' ',
+    'unknown' => '不明',
+]);
+if ($names !== ['repo-A' => '製品A ドキュメント']) {
+    throw new RuntimeException('表示名が正しく検証されていません。');
+}
 
 $hook = $GLOBALS['md_docs_test_actions']['admin_post_md_docs_reload_files'] ?? null;
 if (!is_callable($hook)) {

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MD Docs
  * Description: uploads/docs 配下の Markdown ドキュメントを自動検出して表示します。
- * Version: 1.3.1
+ * Version: 1.3.2
  * Requires at least: 6.4
  * Requires PHP: 8.0
  * Author: bit0ラボ
@@ -19,7 +19,7 @@ require_once __DIR__ . '/class-md-docs-view.php';
 
 final class MD_Docs
 {
-    private const VERSION = '1.3.1';
+    private const VERSION = '1.3.2';
     private const CACHE_TTL = 300;
     private const QUERY_FLAG = 'md_docs_view';
 
@@ -135,15 +135,17 @@ final class MD_Docs
         }
 
         $document_name = preg_replace('/\.md$/i', '', basename($relative_file)) ?? basename($relative_file);
-        if (strcasecmp($document_name, 'README') === 0) {
-            $document_name = $repo;
+        $is_repository_index = strcasecmp($document_name, 'README') === 0;
+        $repository_name = self::repository_display_name($repo);
+        if ($is_repository_index) {
+            $document_name = $repository_name;
         }
 
         $breadcrumbs = [
             ['label' => 'ドキュメント', 'url' => home_url('/docs/')],
-            ['label' => $repo, 'url' => self::docs_url($repo)],
+            ['label' => $repository_name, 'url' => self::docs_url($repo)],
         ];
-        if ($document_name !== $repo) {
+        if (!$is_repository_index) {
             $breadcrumbs[] = ['label' => $document_name];
         }
 
@@ -151,7 +153,7 @@ final class MD_Docs
             'title' => $document_name,
             'breadcrumbs' => $breadcrumbs,
             'home_url' => home_url('/'),
-            'navigation' => self::navigation_data($repo, $files, $relative_file),
+            'navigation' => self::navigation_data($repo, $repository_name, $files, $relative_file),
             'html' => self::cached_markdown($repo, $relative_file, $absolute_file),
         ]);
     }
@@ -180,7 +182,7 @@ final class MD_Docs
             }
 
             $items[] = [
-                'repo' => $repo,
+                'repo' => self::repository_display_name($repo),
                 'url' => self::docs_url($repo, $path),
                 'html' => self::cached_markdown($repo, $relative_file, $absolute_file),
             ];
@@ -220,7 +222,7 @@ final class MD_Docs
             $route = preg_replace('/\.md$/i', '', $default_file) ?? $default_file;
             $route = preg_replace('#(^|/)README$#i', '$1', $route) ?? $route;
             $items[] = [
-                'name' => $repo,
+                'name' => self::repository_display_name($repo),
                 'url' => self::docs_url($repo, trim($route, '/')),
             ];
         }
@@ -350,7 +352,8 @@ final class MD_Docs
 
     private static function markdown_to_html(string $markdown, string $repo, string $current_dir): string
     {
-        $markdown = preg_replace('/\A---\R.*?\R---\R/s', '', str_replace(["\r\n", "\r"], "\n", $markdown)) ?? $markdown;
+        $markdown = preg_replace('/\A\xEF\xBB\xBF/', '', str_replace(["\r\n", "\r"], "\n", $markdown)) ?? $markdown;
+        $markdown = preg_replace('/\A---\R.*?\R---\R/s', '', $markdown) ?? $markdown;
         $lines = explode("\n", $markdown);
         $html = [];
         $paragraph = [];
@@ -373,7 +376,8 @@ final class MD_Docs
             }
         };
 
-        foreach ($lines as $line) {
+        for ($line_index = 0, $line_count = count($lines); $line_index < $line_count; $line_index++) {
+            $line = $lines[$line_index];
             if (preg_match('/^```([A-Za-z0-9_-]*)\s*$/', $line, $match)) {
                 if ($in_code) {
                     $class = $code_language === '' ? '' : ' class="language-' . esc_attr($code_language) . '"';
@@ -392,6 +396,41 @@ final class MD_Docs
             if ($in_code) {
                 $code[] = $line;
                 continue;
+            }
+            if ($line_index + 1 < $line_count) {
+                $headers = self::table_cells($line);
+                $separators = self::table_cells($lines[$line_index + 1]);
+                $is_table = $headers !== []
+                    && count($headers) === count($separators)
+                    && count(array_filter(
+                        $separators,
+                        static fn(string $cell): bool => preg_match('/\A:?-{3,}:?\z/', trim($cell)) === 1
+                    )) === count($separators);
+                if ($is_table) {
+                    $flush_paragraph();
+                    $close_list();
+                    $html[] = '<div class="md-docs__table-wrap"><table><thead><tr>';
+                    foreach ($headers as $cell) {
+                        $html[] = '<th>' . self::inline_markdown(trim($cell), $repo, $current_dir) . '</th>';
+                    }
+                    $html[] = '</tr></thead><tbody>';
+                    $line_index += 2;
+                    while ($line_index < $line_count) {
+                        $cells = self::table_cells($lines[$line_index]);
+                        if ($cells === []) {
+                            break;
+                        }
+                        $html[] = '<tr>';
+                        foreach (array_pad(array_slice($cells, 0, count($headers)), count($headers), '') as $cell) {
+                            $html[] = '<td>' . self::inline_markdown(trim($cell), $repo, $current_dir) . '</td>';
+                        }
+                        $html[] = '</tr>';
+                        $line_index++;
+                    }
+                    $html[] = '</tbody></table></div>';
+                    $line_index--;
+                    continue;
+                }
             }
             if (preg_match('/^(#{1,6})\s+(.+)$/', $line, $match)) {
                 $flush_paragraph();
@@ -438,6 +477,19 @@ final class MD_Docs
         $flush_paragraph();
         $close_list();
         return implode("\n", $html);
+    }
+
+    private static function table_cells(string $line): array
+    {
+        $line = trim($line);
+        if ($line === '' || !str_contains($line, '|')) {
+            return [];
+        }
+
+        $cells = preg_split('/(?<!\\\\)\|/', trim($line, '|'));
+        return is_array($cells)
+            ? array_map(static fn(string $cell): string => str_replace('\\|', '|', $cell), $cells)
+            : [];
     }
 
     private static function inline_markdown(string $text, string $repo, string $current_dir): string
@@ -499,7 +551,7 @@ final class MD_Docs
         return self::uploads_docs_url($repo, $relative) . $query . $fragment;
     }
 
-    private static function navigation_data(string $repo, array $files, string $active): array
+    private static function navigation_data(string $repo, string $repository_name, array $files, string $active): array
     {
         $items = [];
         foreach ($files as $file) {
@@ -508,7 +560,7 @@ final class MD_Docs
             $label = preg_replace('/\.md$/i', '', basename($file)) ?? basename($file);
             $label = strcasecmp($label, 'README') === 0 ? basename(dirname($file)) : $label;
             if ($label === '.' || $label === '') {
-                $label = $repo;
+                $label = $repository_name;
             }
             $items[] = [
                 'label' => $label,
@@ -517,10 +569,21 @@ final class MD_Docs
             ];
         }
         return [
-            'repo' => $repo,
+            'repo' => $repository_name,
             'repo_url' => self::docs_url($repo),
             'items' => $items,
         ];
+    }
+
+    private static function repository_display_name(string $repo): string
+    {
+        $names = get_option(MD_Docs_Settings::OPTION_REPOSITORY_NAMES, []);
+        if (!is_array($names) || !isset($names[$repo]) || !is_string($names[$repo])) {
+            return $repo;
+        }
+
+        $name = trim($names[$repo]);
+        return $name === '' ? $repo : $name;
     }
 
     private static function docs_dir(): string

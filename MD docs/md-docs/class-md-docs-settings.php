@@ -7,6 +7,7 @@ if (!defined('ABSPATH')) {
 final class MD_Docs_Settings
 {
     public const OPTION_ALLOWED_FILES = 'md_docs_allowed_files';
+    public const OPTION_REPOSITORY_NAMES = 'md_docs_repository_names';
 
     private const SETTINGS_GROUP = 'md_docs_settings';
     private const RELOAD_ACTION = 'md_docs_reload_files';
@@ -44,6 +45,14 @@ final class MD_Docs_Settings
                 'sanitize_callback' => [self::class, 'sanitize_allowed_files'],
             ]
         );
+        register_setting(
+            self::SETTINGS_GROUP,
+            self::OPTION_REPOSITORY_NAMES,
+            [
+                'type' => 'array',
+                'sanitize_callback' => [self::class, 'sanitize_repository_names'],
+            ]
+        );
     }
 
     public static function sanitize_allowed_files(mixed $value): array
@@ -63,6 +72,22 @@ final class MD_Docs_Settings
             $allowed[$repo] = array_values(array_unique($selected));
         }
         return $allowed;
+    }
+
+    public static function sanitize_repository_names(mixed $value): array
+    {
+        if (!is_array($value)) {
+            return [];
+        }
+
+        $names = [];
+        foreach (array_keys(self::available_files()) as $repo) {
+            $name = isset($value[$repo]) ? trim(sanitize_text_field((string) $value[$repo])) : '';
+            if ($name !== '') {
+                $names[$repo] = $name;
+            }
+        }
+        return $names;
     }
 
     public static function reload_files(): void
@@ -87,6 +112,8 @@ final class MD_Docs_Settings
         }
 
         $saved = get_option(self::OPTION_ALLOWED_FILES, null);
+        $repository_names = get_option(self::OPTION_REPOSITORY_NAMES, []);
+        $repository_names = is_array($repository_names) ? $repository_names : [];
         $is_unconfigured = !is_array($saved);
         $available_by_repo = self::available_files();
         ?>
@@ -111,9 +138,23 @@ final class MD_Docs_Settings
                     <?php
                     $selected = isset($saved[$repo]) && is_array($saved[$repo]) ? $saved[$repo] : [];
                     $field_name = self::OPTION_ALLOWED_FILES . '[' . $repo . '][]';
+                    $repository_name = isset($repository_names[$repo]) && is_string($repository_names[$repo])
+                        ? $repository_names[$repo]
+                        : '';
                     ?>
                     <fieldset style="margin: 1.5em 0;">
                         <legend><strong><?php echo esc_html($repo); ?></strong></legend>
+                        <p>
+                            <label>
+                                表示名
+                                <input
+                                    type="text"
+                                    name="<?php echo esc_attr(self::OPTION_REPOSITORY_NAMES . '[' . $repo . ']'); ?>"
+                                    value="<?php echo esc_attr($repository_name); ?>"
+                                    placeholder="<?php echo esc_attr($repo); ?>"
+                                >
+                            </label>
+                        </p>
                         <input type="hidden" name="<?php echo esc_attr($field_name); ?>" value="">
 
                         <?php if ($files === []) : ?>

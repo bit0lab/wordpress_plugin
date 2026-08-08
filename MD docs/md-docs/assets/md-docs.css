@@ -319,6 +319,29 @@
     box-shadow: 0 12px 30px rgba(51, 65, 85, 0.12);
 }
 
+.md-docs__table-wrap {
+    margin: 1.25rem 0;
+    overflow-x: auto;
+}
+
+.md-docs__content table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.md-docs__content th,
+.md-docs__content td {
+    padding: 0.7rem 0.8rem;
+    border: 1px solid var(--md-border);
+    text-align: left;
+    vertical-align: top;
+}
+
+.md-docs__content th {
+    background: var(--md-accent-soft);
+    font-weight: 700;
+}
+
 .md-docs__content blockquote {
     margin: 1.5rem 0;
     padding: 0.85rem 1.15rem;
