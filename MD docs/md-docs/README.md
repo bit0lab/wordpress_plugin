@@ -48,10 +48,10 @@ wp-content/uploads/docs/
 | URL                           | 内容                      |
 | ----------------------------- | ------------------------- |
 | `/docs/`                      | リポジトリ一覧            |
-| `/docs/repo-a/`               | `repo-a/README.md`        |
+| `/docs/repo-a/`               | 許可済みファイルの先頭    |
 | `/docs/repo-a/guide/install/` | `repo-a/guide/install.md` |
 
-各フォルダの `README.md` も、そのフォルダのトップとして表示できます。
+`README.md` は必須ではありません。リポジトリ直下の URL では、設定で表示を許可した Markdown の先頭を表示します。各サブフォルダの `README.md` は、そのフォルダのトップとして表示できます。
 
 ## ショートコード
 
@@ -63,6 +63,8 @@ wp-content/uploads/docs/
 [md_docs repo="repo-a" path="guide/install"]
 [md_docs repo="*" path="pr"]
 ```
+
+`[md_docs]` は、設定で表示を許可した Markdown が存在するリポジトリの一覧を表示します。各リポジトリのリンク先は、許可済みファイルの先頭になります。`README.md` は必要ありません。
 
 `path` にはリポジトリを基準としたパスを指定し、末尾の `.md` は省略できます。`repo` と `path` を指定した場合、本文には指定した Markdown を表示し、サイドバーには同じリポジトリ内の Markdown 一覧を表示します。
 

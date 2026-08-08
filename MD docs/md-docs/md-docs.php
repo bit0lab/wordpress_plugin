@@ -119,7 +119,9 @@ final class MD_Docs
         }
 
         $files = self::markdown_files($repo, $repo_dir);
-        $relative_file = self::route_to_file($path, $repo_dir);
+        $relative_file = trim($path, '/') === ''
+            ? ($files[0] ?? null)
+            : self::route_to_file($path, $repo_dir);
         if ($relative_file === null || !in_array($relative_file, $files, true)) {
             return self::notice('指定されたドキュメントが見つかりません。');
         }
@@ -199,18 +201,31 @@ final class MD_Docs
 
     private static function render_repo_list(): string
     {
-        $repos = self::repositories();
-        if ($repos === []) {
+        $items = [];
+        foreach (self::repositories() as $repo) {
+            $repo_dir = self::repo_dir($repo);
+            if ($repo_dir === null) {
+                continue;
+            }
+
+            $files = self::markdown_files($repo, $repo_dir);
+            if ($files === []) {
+                continue;
+            }
+
+            $default_file = $files[0];
+            $route = preg_replace('/\.md$/i', '', $default_file) ?? $default_file;
+            $route = preg_replace('#(^|/)README$#i', '$1', $route) ?? $route;
+            $items[] = [
+                'name' => $repo,
+                'url' => self::docs_url($repo, trim($route, '/')),
+            ];
+        }
+
+        if ($items === []) {
             return self::notice('ドキュメントがありません。');
         }
 
-        $items = array_map(
-            static fn(string $repo): array => [
-                'name' => $repo,
-                'url' => self::docs_url($repo),
-            ],
-            $repos
-        );
         return MD_Docs_View::repositories($items, home_url('/'));
     }
 
