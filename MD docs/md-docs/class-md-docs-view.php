@@ -110,16 +110,9 @@ final class MD_Docs_View
 
         return <<<HTML
             <div class="md-docs-shell md-docs-shell--repos">
-                <header class="md-docs__hero">
-                    <div>
-                        <span class="md-docs__eyebrow">Knowledge base</span>
-                        <p>技術情報を参照できます。</p>
-                    </div>
-                    <div class="md-docs__hero-actions">
-                        {$home_link}
-                        <span class="md-docs__count-badge">{$count} repositories</span>
-                    </div>
-                </header>
+                <div class='md-docs__hero-actions'>
+                    <span class="md-docs__count-badge">{$count} repositories</span>
+                </div>
                 <div class="md-docs md-docs--repos">
                     <section class="md-docs__content">
                         <ul class="md-docs__repo-list">

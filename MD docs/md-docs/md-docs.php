@@ -201,7 +201,7 @@ final class MD_Docs
     {
         $repos = self::repositories();
         if ($repos === []) {
-            return self::notice('uploads/docs 配下にドキュメントがありません。');
+            return self::notice('ドキュメントがありません。');
         }
 
         $items = array_map(
@@ -290,7 +290,7 @@ final class MD_Docs
         }
 
         $candidates = $path === ''
-            ? ['README.md', 'readme.md','pr.md']
+            ? ['README.md', 'readme.md']
             : [$path, $path . '.md', $path . '/README.md', $path . '/readme.md'];
 
         foreach ($candidates as $candidate) {
