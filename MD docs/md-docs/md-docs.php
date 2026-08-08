@@ -30,7 +30,10 @@ final class MD_Docs
         add_filter('query_vars', [self::class, 'add_query_vars']);
         add_action('template_redirect', [self::class, 'render_route']);
         add_shortcode('md_docs', [self::class, 'shortcode']);
-        MD_Docs_Settings::init(static fn(): array => self::settings_files());
+        MD_Docs_Settings::init(
+            static fn(): array => self::settings_files(),
+            static fn(): bool => self::clear_repository_cache()
+        );
     }
 
     public static function activate(): void
@@ -253,6 +256,11 @@ final class MD_Docs
         $repos = array_values($repos);
         set_transient($cache_key, $repos, self::CACHE_TTL);
         return $repos;
+    }
+
+    private static function clear_repository_cache(): bool
+    {
+        return delete_transient('md_docs_repos_' . md5(self::docs_dir()));
     }
 
     private static function markdown_files(string $repo, string $repo_dir): array

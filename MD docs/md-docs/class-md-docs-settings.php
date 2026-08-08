@@ -9,14 +9,18 @@ final class MD_Docs_Settings
     public const OPTION_ALLOWED_FILES = 'md_docs_allowed_files';
 
     private const SETTINGS_GROUP = 'md_docs_settings';
+    private const RELOAD_ACTION = 'md_docs_reload_files';
 
     private static ?Closure $files_provider = null;
+    private static ?Closure $reload_callback = null;
 
-    public static function init(callable $files_provider): void
+    public static function init(callable $files_provider, callable $reload_callback): void
     {
         self::$files_provider = Closure::fromCallable($files_provider);
+        self::$reload_callback = Closure::fromCallable($reload_callback);
         add_action('admin_menu', [self::class, 'add_settings_page']);
         add_action('admin_init', [self::class, 'register_settings']);
+        add_action('admin_post_' . self::RELOAD_ACTION, [self::class, 'reload_files']);
     }
 
     public static function add_settings_page(): void
@@ -61,6 +65,21 @@ final class MD_Docs_Settings
         return $allowed;
     }
 
+    public static function reload_files(): void
+    {
+        if (!current_user_can('manage_options')) {
+            wp_die('この操作を実行する権限がありません。');
+        }
+
+        check_admin_referer(self::RELOAD_ACTION);
+        if (self::$reload_callback !== null) {
+            (self::$reload_callback)();
+        }
+
+        wp_safe_redirect(admin_url('options-general.php?page=md-docs'));
+        exit;
+    }
+
     public static function render_settings_page(): void
     {
         if (!current_user_can('manage_options')) {
@@ -74,6 +93,12 @@ final class MD_Docs_Settings
         <div class="wrap">
             <h1>MD Docs 設定</h1>
             <p>公開を許可する Markdown ファイルをリポジトリごとに選択してください。未選択のファイルは、一覧にも本文にも表示されません。</p>
+
+            <form action="<?php echo esc_url(admin_url('admin-post.php')); ?>" method="post">
+                <input type="hidden" name="action" value="<?php echo esc_attr(self::RELOAD_ACTION); ?>">
+                <?php wp_nonce_field(self::RELOAD_ACTION); ?>
+                <?php submit_button('再読み込み', 'secondary', 'submit', false); ?>
+            </form>
 
             <form action="options.php" method="post">
                 <?php settings_fields(self::SETTINGS_GROUP); ?>
